@@ -13,7 +13,7 @@ def remove_white_background(img):
     new_data = []
     for item in datas:
         # Känner av pixlar som är mycket nära vita (tröskelvärde 240 av 255)
-        if item[0] > 240 and item[1] > 240 and item[2] > 240:
+        if item[0] > 235 and item[1] > 235 and item[2] > 235:
             new_data.append((255, 255, 255, 0))  # Gör pixeln helt genomskinlig
         else:
             new_data.append(item)
