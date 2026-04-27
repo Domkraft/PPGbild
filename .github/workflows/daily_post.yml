@@ -1,16 +1,16 @@
-name: Update Allsvenskan Chart
+name: Allsvenskan PPM Bot
 
 on:
+  push:
+    branches:
+      - main
   schedule:
-    # Körs kl 18:00 varje dag (UTC)
-    # Justera till '0 16 * * *' om du vill ha kl 18 svensk tid pga sommartid
     - cron: '0 18 * * *'
-  workflow_dispatch: # Gör att du kan starta skriptet manuellt under fliken Actions
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -25,8 +25,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests beautifulsoup4 pillow atproto
 
-      - name: Run PPM script
-      env:
-        BSKY_HANDLE: ${{ secrets.BSKY_HANDLE }}
-        BSKY_PASSWORD: ${{ secrets.BSKY_PASSWORD }}
+      - name: Run script
+        env:
+          BSKY_HANDLE: ${{ secrets.BSKY_HANDLE }}
+          BSKY_PASSWORD: ${{ secrets.BSKY_PASSWORD }}
         run: python script.py
