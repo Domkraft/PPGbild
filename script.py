@@ -35,43 +35,45 @@ def get_table_data():
     return teams
 
 def create_visual(teams):
-    """Skapar visualiseringen med rubriker, tidstämpel och PPM-axeln."""
+    """Skapar visualiseringen med rubriker, flerradig tidstämpel och PPM-axeln."""
     if not teams:
         return False
 
-    # Inställningar för bilden
-    width, height = 1200, 700 # Ökad höjd för att få plats med rubrik
+    width, height = 1200, 750 # Lite mer höjd för att rymma flerradig tidstämpel
     logo_size = 90
     margin = 120
     
     img = Image.new('RGBA', (width, height), (255, 255, 255, 255))
     draw = ImageDraw.Draw(img)
     
-    # Försök ladda en font, annars använd standard
     try:
-        # GitHub Actions körs på Ubuntu, så vi letar efter en vanlig linux-font
-        font_main = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 40)
-        font_sub = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
-        font_time = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 16)
+        font_main = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 45)
+        font_sub = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 22)
+        font_time = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 18)
     except:
         font_main = font_sub = font_time = ImageFont.load_default()
 
-    # --- TEXTER I ÖVRE DELEN ---
+    # --- RUBRIKER (Vänster) ---
+    draw.text((40, 40), "Allsvenskan", fill="black", font=font_main)
+    draw.text((40, 95), "relativ position (poäng per match)", fill=(80, 80, 80), font=font_sub)
     
-    # Övre vänstra hörnet: Rubrik
-    draw.text((40, 30), "Allsvenskan", fill="black", font=font_main)
-    draw.text((40, 80), "relativ position (poäng per match)", fill=(100, 100, 100), font=font_sub)
+    # --- TIDSTÄMPEL (Höger, tre rader) ---
+    now = datetime.now()
+    date_str = now.strftime("%Y-%m-%d")
+    time_str = now.strftime("%H:%M")
     
-    # Övre högra hörnet: Datum och klockslag
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")
-    draw.text((width - 200, 30), f"Uppdaterad: {now}", fill=(120, 120, 120), font=font_time)
+    # Vi högerjusterar genom att dra bort ett uppskattat värde från högerkanten
+    r_margin = width - 180
+    draw.text((r_margin, 40), "Uppdaterad:", fill=(120, 120, 120), font=font_time)
+    draw.text((r_margin, 65), date_str, fill=(120, 120, 120), font=font_time)
+    draw.text((r_margin, 90), time_str, fill=(120, 120, 120), font=font_time)
 
     # --- DIAGRAM-LOGIK ---
-
     min_ppm = min(t['ppm'] for t in teams)
     max_ppm = max(t['ppm'] for t in teams)
     ppm_range = max_ppm - min_ppm if max_ppm != min_ppm else 1
 
+    # Sortera för korrekt stapling
     teams.sort(key=lambda x: (x['ppm'], -x['rank']))
     ppm_slots = {}
 
@@ -81,8 +83,10 @@ def create_visual(teams):
         
         slot_key = round(team['ppm'], 2)
         count = ppm_slots.get(slot_key, 0)
-        # Justerad y_pos för att börja lägre ner pga rubriken
-        y_pos = height - 180 - (count * (logo_size + 5))
+        
+        # MINSKAT AVSTÅND: Ändrat från logo_size + 5 till logo_size * 0.7 
+        # Detta gör att de överlappar snyggt vertikalt
+        y_pos = height - 180 - (count * (logo_size * 0.75))
         ppm_slots[slot_key] = count + 1
         
         possible_fnames = [f"logos/{team['name']}.png", f"logos/{team['name'].replace(' ', '_')}.png"]
@@ -93,21 +97,19 @@ def create_visual(teams):
                 try:
                     logo = Image.open(fname).convert("RGBA")
                     logo.thumbnail((logo_size, logo_size), Image.Resampling.LANCZOS)
-                    paste_x = x_pos - logo.width // 2
-                    paste_y = y_pos - logo.height // 2
-                    img.paste(logo, (paste_x, paste_y), logo)
+                    img.paste(logo, (x_pos - logo.width // 2, int(y_pos) - logo.height // 2), logo)
                     logo_found = True
                     break
                 except:
                     continue
 
         if not logo_found:
-            draw.text((x_pos, y_pos), team['name'], fill="black")
+            draw.text((x_pos, int(y_pos)), team['name'], fill="black")
 
     # Rita axeln
     draw.line((margin, height - 120, width - margin, height - 120), fill="black", width=3)
     
-    # Etiketter för PPM på axeln
+    # Etiketter för PPM
     draw.text((margin, height - 100), f"{min_ppm:.2f} PPM", fill="black", font=font_sub)
     draw.text((width - margin - 80, height - 100), f"{max_ppm:.2f} PPM", fill="black", font=font_sub)
     
@@ -125,16 +127,16 @@ def post_to_bluesky():
         with open("allsvenskan_ppm.jpg", "rb") as f:
             img_data = f.read()
         client.send_image(
-            text=f"Aktuell ställning i Allsvenskan (PPM) {datetime.now().strftime('%Y-%m-%d')}. #Allsvenskan #PPM",
+            text=f"Allsvenskan PPM-uppdatering {datetime.now().strftime('%Y-%m-%d')}. #Allsvenskan #PPM",
             image=img_data,
-            image_alt="PPM-karta över Allsvenskan"
+            image_alt="Aktuell tabell baserat på poäng per match."
         )
-        print("Publicerat på Bluesky!")
+        print("Postad på Bluesky!")
     except Exception as e:
-        print(f"Kunde inte posta: {e}")
+        print(f"Bluesky-fel: {e}")
 
 if __name__ == "__main__":
-    table_data = get_table_data()
-    if table_data:
-        if create_visual(table_data):
+    data = get_table_data()
+    if data:
+        if create_visual(data):
             post_to_bluesky()
