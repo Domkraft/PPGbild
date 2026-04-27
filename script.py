@@ -2,7 +2,7 @@ import requests
 from bs4 import BeautifulSoup
 import re
 import os
-from datetime import datetime
+from datetime import datetime, timedelta  # Lagt till timedelta här
 from PIL import Image, ImageDraw, ImageFont
 from atproto import Client
 
@@ -35,11 +35,11 @@ def get_table_data():
     return teams
 
 def create_visual(teams):
-    """Skapar visualiseringen med rubriker, flerradig tidstämpel och PPM-axeln."""
+    """Skapar visualiseringen med rubriker, justerad tidstämpel och PPM-axeln."""
     if not teams:
         return False
 
-    width, height = 1200, 750 # Lite mer höjd för att rymma flerradig tidstämpel
+    width, height = 1200, 750
     logo_size = 90
     margin = 120
     
@@ -57,12 +57,12 @@ def create_visual(teams):
     draw.text((40, 40), "Allsvenskan", fill="black", font=font_main)
     draw.text((40, 95), "relativ position (poäng per match)", fill=(80, 80, 80), font=font_sub)
     
-    # --- TIDSTÄMPEL (Höger, tre rader) ---
-    now = datetime.now()
+    # --- TIDSTÄMPEL (Höger, justerad +2 timmar) ---
+    # Här lägger vi till 2 timmar för att matcha svensk tid (sommartid)
+    now = datetime.utcnow() + timedelta(hours=2) 
     date_str = now.strftime("%Y-%m-%d")
     time_str = now.strftime("%H:%M")
     
-    # Vi högerjusterar genom att dra bort ett uppskattat värde från högerkanten
     r_margin = width - 180
     draw.text((r_margin, 40), "Uppdaterad:", fill=(120, 120, 120), font=font_time)
     draw.text((r_margin, 65), date_str, fill=(120, 120, 120), font=font_time)
@@ -73,7 +73,6 @@ def create_visual(teams):
     max_ppm = max(t['ppm'] for t in teams)
     ppm_range = max_ppm - min_ppm if max_ppm != min_ppm else 1
 
-    # Sortera för korrekt stapling
     teams.sort(key=lambda x: (x['ppm'], -x['rank']))
     ppm_slots = {}
 
@@ -84,8 +83,7 @@ def create_visual(teams):
         slot_key = round(team['ppm'], 2)
         count = ppm_slots.get(slot_key, 0)
         
-        # MINSKAT AVSTÅND: Ändrat från logo_size + 5 till logo_size * 0.7 
-        # Detta gör att de överlappar snyggt vertikalt
+        # Kompakt stapling
         y_pos = height - 180 - (count * (logo_size * 0.75))
         ppm_slots[slot_key] = count + 1
         
@@ -126,8 +124,11 @@ def post_to_bluesky():
         client.login(handle, password)
         with open("allsvenskan_ppm.jpg", "rb") as f:
             img_data = f.read()
+        
+        # Även här justerar vi tiden för textposten
+        sweden_time = datetime.utcnow() + timedelta(hours=2)
         client.send_image(
-            text=f"Allsvenskan PPM-uppdatering {datetime.now().strftime('%Y-%m-%d')}. #Allsvenskan #PPM",
+            text=f"Allsvenskan PPM-uppdatering {sweden_time.strftime('%Y-%m-%d %H:%M')}. #Allsvenskan #PPM",
             image=img_data,
             image_alt="Aktuell tabell baserat på poäng per match."
         )
