@@ -1,0 +1,23 @@
+name: Update Allsvenskan Chart
+on:
+  schedule:
+    - cron: '0 18 * * *' # Körs kl 18:00 varje dag
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Install dependencies
+        run: |
+          pip install requests beautifulsoup4 pillow atproto
+      - name: Run script
+        env:
+          BSKY_HANDLE: ${{ secrets.BSKY_HANDLE }}
+          BSKY_PASSWORD: ${{ secrets.BSKY_PASSWORD }}
+        run: python script.py
