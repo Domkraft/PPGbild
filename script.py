@@ -1,73 +1,143 @@
 import requests
 from bs4 import BeautifulSoup
 import re
+import os
 from PIL import Image, ImageDraw
 from atproto import Client
 
-# 1. Hämta data från SVT Text
-def get_table():
+def get_table_data():
+    """Hämtar och parsar data från SVT Text sida 343."""
     url = "https://www.svt.se/text-tv/webb/343"
-    response = requests.get(url)
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+    except Exception as e:
+        print(f"Kunde inte hämta data från SVT: {e}")
+        return []
+
     soup = BeautifulSoup(response.content, 'html.parser')
     text = soup.get_text()
     
-    # Regex för att hitta rader: Placering, Lag, Matcher, V, O, F, Mål, Poäng
-    # Exempel: " 1 Malmö FF      4  4  0  0  12-1   12"
-    pattern = re.compile(r"(\d+)\s+([A-Za-zÅÄÖåäö\s\-]+?)\s+(\d+)\s+\d+\s+\d+\s+\d+\s+[\d\-]+\s+(\d+)")
+    # Regex för att hitta: Rank, Lag, Matcher, V, O, F, Mål, Poäng
+    # Justerad för att hantera lagnamn med mellanslag och siffror
+    pattern = re.compile(r"^\s*(\d+)\s+([A-ZÅÄÖ][a-zåäöA-ZÅÄÖ0-9\s\-\.]+?)\s+(\d+)\s+\d+\s+\d+\s+\d+\s+[\d\-]+\s+(\d+)", re.MULTILINE)
+    
     teams = []
     for match in pattern.finditer(text):
-        rank, name, games, points = match.groups()
-        name = name.strip()
-        ppm = int(points) / int(games)
-        teams.append({'rank': int(rank), 'name': name, 'ppm': ppm})
+        rank = int(match.group(1))
+        name = match.group(2).strip()
+        games = int(match.group(3))
+        points = int(match.group(4))
+        
+        if games > 0:
+            ppm = points / games
+            teams.append({'rank': rank, 'name': name, 'ppm': ppm})
+    
     return teams
 
-# 2. Skapa bilden
-def create_chart(teams):
-    width, height = 1200, 400
-    img = Image.new('RGB', (width, height), color='white')
+def create_visual(teams):
+    """Skapar PPM-visualiseringen."""
+    if not teams:
+        return False
+
+    # Inställningar för bilden
+    width, height = 1200, 600
+    logo_size = 80
+    margin = 120
+    bg_color = (255, 255, 255) # Vit
+    
+    img = Image.new('RGBA', (width, height), bg_color)
     draw = ImageDraw.Draw(img)
     
+    # Beräkna omfång för axeln
     min_ppm = min(t['ppm'] for t in teams)
     max_ppm = max(t['ppm'] for t in teams)
-    
-    # Skalningsfunktion
-    def get_x(ppm):
-        if max_ppm == min_ppm: return width // 2
-        return 100 + (ppm - min_ppm) / (max_ppm - min_ppm) * (width - 200)
+    ppm_range = max_ppm - min_ppm if max_ppm != min_ppm else 1
 
-    # Sortera för att hantera stapling (lägst rank överst vid samma PPM)
+    # Sortera: Lägst PPM först. Vid lika PPM: Högst rank (störst siffra) först 
+    # så att de med lägre rank (bättre placering) ritas sist/överst.
     teams.sort(key=lambda x: (x['ppm'], -x['rank']))
     
-    ppm_counts = {}
-    logo_size = 60
-    
+    # Håll koll på stapling för överlappande PPM
+    ppm_slots = {}
+
     for team in teams:
-        x = int(get_x(team['ppm']))
-        count = ppm_counts.get(team['ppm'], 0)
-        y = height - 100 - (count * (logo_size + 5))
-        ppm_counts[team['ppm']] = count + 1
+        # X-position baserat på PPM
+        x_ratio = (team['ppm'] - min_ppm) / ppm_range
+        x_pos = int(margin + x_ratio * (width - 2 * margin))
         
-        try:
-            logo = Image.open(f"logos/{team['name'].replace(' ', '_')}.png").convert("RGBA")
-            logo = logo.resize((logo_size, logo_size))
-            img.paste(logo, (x - logo_size//2, y), logo)
-        except FileNotFoundError:
-            draw.text((x, y), team['name'], fill="black")
+        # Y-position (stapling)
+        slot_key = round(team['ppm'], 2)
+        count = ppm_slots.get(slot_key, 0)
+        y_pos = height - 150 - (count * (logo_size + 10))
+        ppm_slots[slot_key] = count + 1
+        
+        # Försök ladda logotypen
+        # Vi testar både med mellanslag och understreck för att vara säkra
+        possible_filenames = [
+            f"logos/{team['name']}.png",
+            f"logos/{team['name'].replace(' ', '_')}.png"
+        ]
+        
+        logo_found = False
+        for fname in possible_filenames:
+            if os.path.exists(fname):
+                try:
+                    logo = Image.open(fname).convert("RGBA")
+                    logo.thumbnail((logo_size, logo_size), Image.Resampling.LANCZOS)
+                    # Centrera logon på x-koordinaten
+                    img.paste(logo, (x_pos - logo.width // 2, y_pos - logo.height // 2), logo)
+                    logo_found = True
+                    break
+                except Exception as e:
+                    print(f"Fel vid laddning av {fname}: {e}")
 
-    # Rita axel
-    draw.line((100, height-80, width-100, height-80), fill="black", width=2)
-    img.save("daily_table.png")
+        if not logo_found:
+            # Reserv om bild saknas: Skriv ut namnet
+            draw.text((x_pos, y_pos), team['name'], fill="black")
 
-# 3. Posta till Bluesky
+    # Rita axeln
+    draw.line((margin, height - 100, width - margin, height - 100), fill="black", width=3)
+    
+    # Lägg till labels för min/max PPM
+    draw.text((margin, height - 80), f"{min_ppm:.2f} PPM", fill="black")
+    draw.text((width - margin - 40, height - 80), f"{max_ppm:.2f} PPM", fill="black")
+    
+    img.convert("RGB").save("allsvenskan_ppm.jpg", "JPEG", quality=95)
+    return True
+
 def post_to_bluesky():
-    client = Client()
-    client.login('ditt-konto.bsky.social', 'ditt-app-lösenord')
-    with open('daily_table.png', 'rb') as f:
-        img_data = f.read()
-    client.send_image(text="Dagens Allsvenska PPM-karta", image=img_data, image_alt="Tabellvisualisering")
+    """Postar den genererade bilden till Bluesky."""
+    handle = os.environ.get('BSKY_HANDLE')
+    password = os.environ.get('BSKY_PASSWORD')
+    
+    if not handle or not password:
+        print("Fel: Saknar inloggningsuppgifter för Bluesky.")
+        return
+
+    try:
+        client = Client()
+        client.login(handle, password)
+        
+        with open("allsvenskan_ppm.jpg", "rb") as f:
+            img_data = f.read()
+            
+        client.send_image(
+            text="Aktuell ställning i Allsvenskan baserat på Poäng Per Match (PPM). \n\n#Allsvenskan #SvenskFotboll",
+            image=img_data,
+            image_alt="Diagram över Allsvenskans lag placerade efter poäng per match."
+        )
+        print("Inlägget publicerat på Bluesky!")
+    except Exception as e:
+        print(f"Kunde inte posta till Bluesky: {e}")
 
 if __name__ == "__main__":
-    data = get_table()
-    create_chart(data)
-    # post_to_bluesky() # Avkommentera när du har credentials
+    print("Startar skript...")
+    table_data = get_table_data()
+    if table_data:
+        print(f"Hämtade data för {len(table_data)} lag.")
+        if create_visual(table_data):
+            print("Bild genererad.")
+            post_to_bluesky()
+    else:
+        print("Ingen data hittades.")
