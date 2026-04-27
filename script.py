@@ -2,9 +2,9 @@ import requests
 from bs4 import BeautifulSoup
 import re
 import os
-from datetime import datetime, timedelta  # Lagt till timedelta här
+from datetime import datetime, timedelta
 from PIL import Image, ImageDraw, ImageFont
-from atproto import Client
+from atproto import Client, client_utils
 
 def get_table_data():
     """Hämtar tabelluppgifter från SVT Text sida 343."""
@@ -35,7 +35,7 @@ def get_table_data():
     return teams
 
 def create_visual(teams):
-    """Skapar visualiseringen med rubriker, justerad tidstämpel och PPM-axeln."""
+    """Skapar visualiseringen med rubriker, tidstämpel och PPM-axeln."""
     if not teams:
         return False
 
@@ -57,8 +57,7 @@ def create_visual(teams):
     draw.text((40, 40), "Allsvenskan", fill="black", font=font_main)
     draw.text((40, 95), "relativ position (poäng per match)", fill=(80, 80, 80), font=font_sub)
     
-    # --- TIDSTÄMPEL (Höger, justerad +2 timmar) ---
-    # Här lägger vi till 2 timmar för att matcha svensk tid (sommartid)
+    # --- TIDSTÄMPEL (Höger, +2h) ---
     now = datetime.utcnow() + timedelta(hours=2) 
     date_str = now.strftime("%Y-%m-%d")
     time_str = now.strftime("%H:%M")
@@ -83,7 +82,6 @@ def create_visual(teams):
         slot_key = round(team['ppm'], 2)
         count = ppm_slots.get(slot_key, 0)
         
-        # Kompakt stapling
         y_pos = height - 180 - (count * (logo_size * 0.75))
         ppm_slots[slot_key] = count + 1
         
@@ -122,17 +120,38 @@ def post_to_bluesky():
     try:
         client = Client()
         client.login(handle, password)
+        
         with open("allsvenskan_ppm.jpg", "rb") as f:
             img_data = f.read()
         
-        # Även här justerar vi tiden för textposten
         sweden_time = datetime.utcnow() + timedelta(hours=2)
+        
+        # --- BYGG TEXT MED TAGGAR ---
+        text_builder = client_utils.TextBuilder()
+        text_builder.text(f"Allsvenskan PPM-uppdatering {sweden_time.strftime('%Y-%m-%d %H:%M')}\n\n")
+        
+        text_builder.tag("#Allsvenskan", "Allsvenskan")
+        text_builder.text(" ")
+        text_builder.tag("#ifkgbg", "ifkgbg")
+        text_builder.text(" ")
+        text_builder.tag("#AIK", "AIK")
+        text_builder.text(" ")
+        text_builder.tag("#MFF", "MFF")
+        text_builder.text(" ")
+        text_builder.tag("#HIF", "HIF")
+        text_builder.text(" ")
+        text_builder.tag("#DIF", "DIF")
+        text_builder.text(" ")
+        text_builder.tag("#GAIS", "GAIS")
+        text_builder.text(" ")
+        text_builder.tag("#ÖIS", "ÖIS")
+
         client.send_image(
-            text=f"Allsvenskan PPM-uppdatering {sweden_time.strftime('%Y-%m-%d %H:%M')}. #Allsvenskan #PPM",
+            text=text_builder,
             image=img_data,
             image_alt="Aktuell tabell baserat på poäng per match."
         )
-        print("Postad på Bluesky!")
+        print("Postad på Bluesky med klickbara taggar!")
     except Exception as e:
         print(f"Bluesky-fel: {e}")
 
