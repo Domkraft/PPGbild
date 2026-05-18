@@ -72,24 +72,26 @@ def create_visual(teams):
     max_ppm = max(t['ppm'] for t in teams)
     ppm_range = max_ppm - min_ppm if max_ppm != min_ppm else 1
 
+    # Dynamiskt toleransintervall: 5 % av skillnaden mellan Max och Min
+    tolerance = ppm_range * 0.05
+
     # Sortera efter PPM (lägst först), vid lika PPM sorteras lägst rank först (bäst placerad överst)
     teams.sort(key=lambda x: (x['ppm'], -x['rank']))
     
-    # Lista för att hålla reda på redan placerade grupper/staplar:
-    # Varje element är en dict: {'base_ppm': float, 'x_pos': int, 'count': int}
+    # Lista för att hålla reda på redan placerade grupper/staplar
     placed_slots = []
 
     for team in teams:
         target_slot = None
         
-        # Sök efter en befintlig stapel inom +-0.1 PPM
+        # Sök efter en befintlig stapel inom toleransintervallet
         for slot in placed_slots:
-            if abs(team['ppm'] - slot['base_ppm']) <= 0.1:
+            if abs(team['ppm'] - slot['base_ppm']) <= tolerance:
                 target_slot = slot
                 break
         
         if target_slot is not None:
-            # Skapa inte ett nytt X, använd det som redan är etablerat för denna grupp
+            # Använd det X som redan är etablerat för denna grupp
             x_pos = target_slot['x_pos']
             count = target_slot['count']
             target_slot['count'] += 1
