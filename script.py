@@ -72,18 +72,40 @@ def create_visual(teams):
     max_ppm = max(t['ppm'] for t in teams)
     ppm_range = max_ppm - min_ppm if max_ppm != min_ppm else 1
 
+    # Sortera efter PPM (lägst först), vid lika PPM sorteras lägst rank först (bäst placerad överst)
     teams.sort(key=lambda x: (x['ppm'], -x['rank']))
-    ppm_slots = {}
+    
+    # Lista för att hålla reda på redan placerade grupper/staplar:
+    # Varje element är en dict: {'base_ppm': float, 'x_pos': int, 'count': int}
+    placed_slots = []
 
     for team in teams:
-        x_ratio = (team['ppm'] - min_ppm) / ppm_range
-        x_pos = int(margin + x_ratio * (width - 2 * margin))
+        target_slot = None
         
-        slot_key = round(team['ppm'], 2)
-        count = ppm_slots.get(slot_key, 0)
+        # Sök efter en befintlig stapel inom +-0.1 PPM
+        for slot in placed_slots:
+            if abs(team['ppm'] - slot['base_ppm']) <= 0.1:
+                target_slot = slot
+                break
         
+        if target_slot is not None:
+            # Skapa inte ett nytt X, använd det som redan är etablerat för denna grupp
+            x_pos = target_slot['x_pos']
+            count = target_slot['count']
+            target_slot['count'] += 1
+        else:
+            # Skapa en ny stapel på axeln
+            x_ratio = (team['ppm'] - min_ppm) / ppm_range
+            x_pos = int(margin + x_ratio * (width - 2 * margin))
+            count = 0
+            placed_slots.append({
+                'base_ppm': team['ppm'],
+                'x_pos': x_pos,
+                'count': 1
+            })
+        
+        # Beräkna Y-position baserat på hur många som ligger i samma stapel
         y_pos = height - 180 - (count * (logo_size * 0.75))
-        ppm_slots[slot_key] = count + 1
         
         possible_fnames = [f"logos/{team['name']}.png", f"logos/{team['name'].replace(' ', '_')}.png"]
         logo_found = False
