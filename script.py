@@ -1,57 +1,3 @@
-import requests
-from bs4 import BeautifulSoup
-import re
-import os
-from datetime import datetime, timedelta
-from PIL import Image, ImageDraw, ImageFont
-from atproto import Client, client_utils
-
-def check_if_games_played():
-    """Kollar sida 344 om det spelats matcher idag."""
-    url = "https://www.svt.se/text-tv/webb/344"
-    try:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.content, 'html.parser')
-        text = soup.get_text()
-        
-        months = ["jan", "feb", "mar", "apr", "maj", "jun", "jul", "aug", "sep", "okt", "nov", "dec"]
-        now = datetime.utcnow() + timedelta(hours=2)
-        today_str = f"{now.day} {months[now.month-1]}"
-        
-        if today_str in text.lower():
-            print(f"Matcher hittade för {today_str}. Går vidare till postning.")
-            return True
-        else:
-            print(f"Inga matcher spelade idag ({today_str}). Avbryter.")
-            return False
-    except Exception as e:
-        print(f"Kunde inte kolla spelschema: {e}")
-        return True
-
-def get_table_data():
-    url = "https://www.svt.se/text-tv/webb/343"
-    try:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-    except Exception as e:
-        print(f"Kunde inte hämta data: {e}")
-        return []
-
-    soup = BeautifulSoup(response.content, 'html.parser')
-    text = soup.get_text()
-    pattern = re.compile(r"^\s*(\d+)\s+([A-ZÅÄÖ][a-zåäöA-ZÅÄÖ0-9\s\-\.]+?)\s+(\d+)\s+\d+\s+\d+\s+\d+\s+[\d\-]+\s+(\d+)", re.MULTILINE)
-    
-    teams = []
-    for match in pattern.finditer(text):
-        rank = int(match.group(1))
-        name = match.group(2).strip()
-        games = int(match.group(3))
-        points = int(match.group(4))
-        if games > 0:
-            teams.append({'rank': rank, 'name': name, 'ppm': points / games})
-    return teams
-
 def create_visual(teams):
     if not teams: return False
     width, height = 1200, 750
@@ -80,17 +26,21 @@ def create_visual(teams):
     max_ppm = max(t['ppm'] for t in teams)
     ppm_range = max_ppm - min_ppm if max_ppm != min_ppm else 1
     
+    # Sortera: lägst PPM först. Vid lika PPM hamnar högre rank överst.
     teams.sort(key=lambda x: (x['ppm'], -x['rank']))
     ppm_slots = {}
 
     for team in teams:
-        # HÄR ÄR ÄNDRINGEN: X-positionen beräknas på den exakta, oavrundade PPM-nivån
+        # 1. Beräkna den exakta unika X-positionen baserat på oavrundad PPM
         x_ratio = (team['ppm'] - min_ppm) / ppm_range
         x_pos = int(margin + x_ratio * (width - 2 * margin))
         
-        # Vi avrundar fortfarande till 2 decimaler ENBART för att gruppera Y-axeln (staplingen)
-        slot_key = round(team['ppm'], 2)
+        # 2. FIXEN: Vi avrundar till 1 decimal (eller 2 beroende på hur känslig staplingen ska vara)
+        # enbart för att se om lagen hamnar i samma vertikala korridor.
+        slot_key = round(team['ppm'], 1) 
         count = ppm_slots.get(slot_key, 0)
+        
+        # Beräkna Y baserat på hur många som redan ligger i denna korridor
         y_pos = height - 180 - (count * (logo_size * 0.75))
         ppm_slots[slot_key] = count + 1
         
@@ -101,7 +51,7 @@ def create_visual(teams):
                 try:
                     logo = Image.open(fname).convert("RGBA")
                     logo.thumbnail((logo_size, logo_size), Image.Resampling.LANCZOS)
-                    # Skölden centreras nu på sin exakta unika x_pos, men behåller sin staplade y_pos
+                    # Klistra in på exakt x_pos men med den staplade y_pos
                     img.paste(logo, (x_pos - logo.width // 2, int(y_pos) - logo.height // 2), logo)
                     logo_found = True
                     break
@@ -115,31 +65,3 @@ def create_visual(teams):
     
     img.convert("RGB").save("allsvenskan_ppm.jpg", "JPEG", quality=95)
     return True
-
-def post_to_bluesky():
-    handle = os.environ.get('BSKY_HANDLE')
-    password = os.environ.get('BSKY_PASSWORD')
-    if not handle or not password: return
-    try:
-        client = Client()
-        client.login(handle, password)
-        with open("allsvenskan_ppm.jpg", "rb") as f:
-            img_data = f.read()
-        sweden_time = datetime.utcnow() + timedelta(hours=2)
-        text_builder = client_utils.TextBuilder()
-        text_builder.text(f"Allsvenskan PPM-uppdatering {sweden_time.strftime('%Y-%m-%d %H:%M')}\n\n")
-        tags = [("#Allsvenskan", "Allsvenskan"), ("#ifkgbg", "ifkgbg"), ("#AIK", "AIK"), ("#MFF", "MFF"), 
-                ("#HIF", "HIF"), ("#DIF", "DIF"), ("#GAIS", "GAIS"), ("#ÖIS", "ÖIS")]
-        for tag, label in tags:
-            text_builder.tag(tag, label)
-            text_builder.text(" ")
-        client.send_image(text=text_builder, image=img_data, image_alt="PPM-karta")
-    except Exception as e:
-        print(f"Fel: {e}")
-
-if __name__ == "__main__":
-    if check_if_games_played():
-        table_data = get_table_data()
-        if table_data:
-            if create_visual(table_data):
-                post_to_bluesky()
