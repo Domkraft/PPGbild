@@ -103,7 +103,7 @@ def create_visual(teams):
             collision = False
             for px, py in placed_logos:
                 # Tröskeln är nu satt till 30 pixlar för tätare horisontell placering
-                if abs(py - pot_y) < 5 and abs(px - x_pos) < 30:
+                if abs(py - pot_y) < 5 and abs(px - x_pos) < 45:
                     collision = True
                     break
             
