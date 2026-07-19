@@ -28,21 +28,40 @@ def create_visual(teams):
     
     # Sortera: lägst PPM först. Vid lika PPM hamnar högre rank överst.
     teams.sort(key=lambda x: (x['ppm'], -x['rank']))
-    ppm_slots = {}
+    
+    # Vi sparar koordinaterna för de logotyper vi redan har ritat ut
+    # Format: (x_center, y_center)
+    placed_logos = []
 
     for team in teams:
         # 1. Beräkna den exakta unika X-positionen baserat på oavrundad PPM
         x_ratio = (team['ppm'] - min_ppm) / ppm_range
         x_pos = int(margin + x_ratio * (width - 2 * margin))
         
-        # 2. FIXEN: Vi avrundar till 1 decimal (eller 2 beroende på hur känslig staplingen ska vara)
-        # enbart för att se om lagen hamnar i samma vertikala korridor.
-        slot_key = round(team['ppm'], 1) 
-        count = ppm_slots.get(slot_key, 0)
-        
-        # Beräkna Y baserat på hur många som redan ligger i denna korridor
-        y_pos = height - 180 - (count * (logo_size * 0.75))
-        ppm_slots[slot_key] = count + 1
+        # 2. Hitta rätt Y-nivå genom att kontrollera om vi krockar horisontellt med en befintlig logotyp
+        current_level = 0
+        while True:
+            # Beräkna potentiell Y-position för denna nivå
+            pot_y = height - 180 - (current_level * (logo_size * 0.75))
+            
+            # Kolla om vi krockar med NÅGON logotyp på samma Y-nivå inom 60 pixlars avstånd i X-led
+            collision = False
+            for px, py in placed_logos:
+                if abs(py - pot_y) < 5: # Samma Y-nivå (med lite felmarginal)
+                    if abs(px - x_pos) < 60: # För nära i X-led (logotyperna skulle överlappa fult)
+                        collision = True
+                        break
+            
+            if collision:
+                # Om det krockar, testa nästa nivå uppåt
+                current_level += 1
+            else:
+                # Ingen krock funnen på denna nivå, vi tar den!
+                y_pos = pot_y
+                break
+                
+        # Spara den valda positionen
+        placed_logos.append((x_pos, y_pos))
         
         possible_fnames = [f"logos/{team['name']}.png", f"logos/{team['name'].replace(' ', '_')}.png"]
         logo_found = False
@@ -51,7 +70,6 @@ def create_visual(teams):
                 try:
                     logo = Image.open(fname).convert("RGBA")
                     logo.thumbnail((logo_size, logo_size), Image.Resampling.LANCZOS)
-                    # Klistra in på exakt x_pos men med den staplade y_pos
                     img.paste(logo, (x_pos - logo.width // 2, int(y_pos) - logo.height // 2), logo)
                     logo_found = True
                     break
