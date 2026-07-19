@@ -1,3 +1,58 @@
+import requests
+from bs4 import BeautifulSoup
+import re
+import os
+from datetime import datetime, timedelta
+from PIL import Image, ImageDraw, ImageFont
+from atproto import Client, client_utils
+
+def check_if_games_played():
+    """Kollar sida 344 om det spelats matcher idag."""
+    url = "https://www.svt.se/text-tv/webb/344"
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        text = soup.get_text()
+        
+        months = ["jan", "feb", "mar", "apr", "maj", "jun", "jul", "aug", "sep", "okt", "nov", "dec"]
+        now = datetime.utcnow() + timedelta(hours=2)
+        today_str = f"{now.day} {months[now.month-1]}"
+        
+        if today_str in text.lower():
+            print(f"Matcher hittade för {today_str}. Går vidare till postning.")
+            return True
+        else:
+            print(f"Inga matcher spelade idag ({today_str}). Avbryter.")
+            return False
+    except Exception as e:
+        print(f"Kunde inte kolla spelschema: {e}")
+        return True
+
+def get_table_data():
+    """Hämtar tabelluppgifter från SVT Text sida 343."""
+    url = "https://www.svt.se/text-tv/webb/343"
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+    except Exception as e:
+        print(f"Kunde inte hämta data: {e}")
+        return []
+
+    soup = BeautifulSoup(response.content, 'html.parser')
+    text = soup.get_text()
+    pattern = re.compile(r"^\s*(\d+)\s+([A-ZÅÄÖ][a-zåäöA-ZÅÄÖ0-9\s\-\.]+?)\s+(\d+)\s+\d+\s+\d+\s+\d+\s+[\d\-]+\s+(\d+)", re.MULTILINE)
+    
+    teams = []
+    for match in pattern.finditer(text):
+        rank = int(match.group(1))
+        name = match.group(2).strip()
+        games = int(match.group(3))
+        points = int(match.group(4))
+        if games > 0:
+            teams.append({'rank': rank, 'name': name, 'ppm': points / games})
+    return teams
+
 def create_visual(teams):
     """Skapar visualiseringen med pixelbaserad stapling och exakta X-koordinater."""
     if not teams: return False
@@ -47,8 +102,7 @@ def create_visual(teams):
             
             collision = False
             for px, py in placed_logos:
-                # ÄNDRING: Sänkt från 60 till 30 pixlar. 
-                # Nu tillåts mycket tätare horisontell placering innan de tvingas uppåt.
+                # Tröskeln är nu satt till 30 pixlar för tätare horisontell placering
                 if abs(py - pot_y) < 5 and abs(px - x_pos) < 30:
                     collision = True
                     break
@@ -84,3 +138,36 @@ def create_visual(teams):
     
     img.convert("RGB").save("allsvenskan_ppm.jpg", "JPEG", quality=95)
     return True
+
+def post_to_bluesky():
+    """Hanterar inloggning och publicering på Bluesky med rika taggar."""
+    handle = os.environ.get('BSKY_HANDLE')
+    password = os.environ.get('BSKY_PASSWORD')
+    if not handle or not password: return
+    try:
+        client = Client()
+        client.login(handle, password)
+        with open("allsvenskan_ppm.jpg", "rb") as f:
+            img_data = f.read()
+            
+        sweden_time = datetime.utcnow() + timedelta(hours=2)
+        text_builder = client_utils.TextBuilder()
+        text_builder.text(f"Allsvenskan PPM-uppdatering {sweden_time.strftime('%Y-%m-%d %H:%M')}\n\n")
+        
+        tags = [("#Allsvenskan", "Allsvenskan"), ("#ifkgbg", "ifkgbg"), ("#AIK", "AIK"), ("#MFF", "MFF"), 
+                ("#HIF", "HIF"), ("#DIF", "DIF"), ("#GAIS", "GAIS"), ("#ÖIS", "ÖIS")]
+        for tag, label in tags:
+            text_builder.tag(tag, label)
+            text_builder.text(" ")
+            
+        client.send_image(text=text_builder, image=img_data, image_alt="PPM-karta över Allsvenskan")
+        print("Postad på Bluesky!")
+    except Exception as e:
+        print(f"Fel vid Bluesky-postning: {e}")
+
+if __name__ == "__main__":
+    if check_if_games_played():
+        table_data = get_table_data()
+        if table_data:
+            if create_visual(table_data):
+                post_to_bluesky()
